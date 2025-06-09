@@ -482,6 +482,46 @@ export default {
           }
         }
 
+        // 更换二维码图片
+        if (path === 'api/update-qr-code') {
+          if (request.method === 'PUT') {
+            const data = await request.json();
+            
+            // 验证输入参数
+            if (!data.path || !data.qrCodeData) {
+              return new Response(JSON.stringify({ error: '缺少必要参数' }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json' }
+              });
+            }
+
+            // 检查映射是否存在
+            const existingMapping = await DB.prepare(`
+              SELECT path, target, name, expiry, enabled, isWechat
+              FROM mappings
+              WHERE path = ?
+            `).bind(data.path).first();
+
+            if (!existingMapping) {
+              return new Response(JSON.stringify({ error: '短链不存在' }), {
+                status: 404,
+                headers: { 'Content-Type': 'application/json' }
+              });
+            }
+
+            // 更新二维码数据并设置为微信二维码
+            await DB.prepare(`
+              UPDATE mappings 
+              SET qrCodeData = ?, isWechat = 1
+              WHERE path = ?
+            `).bind(data.qrCodeData, data.path).run();
+
+            return new Response(JSON.stringify({ success: true }), {
+              headers: { 'Content-Type': 'application/json' }
+            });
+          }
+        }
+
         return new Response('Not Found', { status: 404 });
       } catch (error) {
         console.error('API operation error:', error);
