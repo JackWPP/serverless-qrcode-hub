@@ -545,9 +545,10 @@
                         <tr>
                             <th class="w-[15%]">条目名称</th>
                             <th class="w-[12%]">短链名</th>
-                            <th class="w-[28%]">目标 URL</th>
-                            <th class="w-[15%]">有效日期</th>
-                            <th class="w-[30%]">状态</th>
+                            <th class="w-[25%]">目标 URL</th>
+                            <th class="w-[13%]">有效日期</th>
+                            <th class="w-[15%]">状态</th>
+                            <th class="w-[20%]">操作</th>
                         </tr>
                     </thead>
                     <tbody id="mappingsTableBody">
@@ -1430,25 +1431,31 @@
                 `;
                 row.appendChild(statusCell);
 
+                // Store the original mapping data for editing
+                row.dataset.originalData = JSON.stringify(mapping);
+
                 const actionsCell = document.createElement('td');
                 actionsCell.innerHTML = `
                     <div class="join">
                         <button class="join-item btn btn-warning btn-sm">编辑</button>
                         <button class="join-item btn btn-error btn-sm">删除</button>
-                        <button class="join-item btn btn-info btn-sm">二维码</button>
+                        <button class="join-item btn btn-info btn-sm">管理二维码</button>
                     </div>
                 `;
 
                 // 添加事件监听器
-                const [editBtn, deleteBtn, qrBtn] = actionsCell.querySelectorAll('button');
+                const [editBtn, deleteBtn, manageQrBtn] = actionsCell.querySelectorAll('button');
                 editBtn.onclick = () => toggleEditMode(row);
                 deleteBtn.onclick = (e) => {
                     e.preventDefault();
                     deleteMapping(path);
                 };
-                qrBtn.onclick = () => {
-                    // 目前只传递一个URL，第二个URL的逻辑待定
-                    generateQRForMapping(window.location.origin + '/' + path, path, null, null);
+                manageQrBtn.onclick = () => {
+                    // 从 mapping 对象中获取新的二维码数据，如果不存在则使用 null
+                    const qrCodeData1 = mapping.qrCodeData1 || null;
+                    const qrCodeData2 = mapping.qrCodeData2 || null;
+                    const qrOrder = mapping.qrOrder || null;
+                    openQrManagementModal(path, mapping.target, qrCodeData1, qrCodeData2, qrOrder);
                 };
 
                 row.appendChild(actionsCell);
@@ -1546,8 +1553,15 @@
                         saveBtn.onclick = () => saveEdit(row);
                         cancelBtn.onclick = () => restoreRow(row);
                         qrBtn.onclick = () => {
-                            // 目前只传递一个URL，第二个URL的逻辑待定
-                            generateQRForMapping(window.location.origin + '/' + originalData.path, originalData.path, null, null);
+                            const path = originalData.path;
+                            const target = originalData.target;
+                            // 从 mappingData 获取二维码数据，如果不存在则使用 null
+                            // 注意: mappingData 在这个上下文中可能未定义，需要确认数据来源
+                            // 暂时假设 originalData 包含这些字段，或者它们可以为 null
+                            const qrCodeData1 = originalData.qrCodeData1 || null;
+                            const qrCodeData2 = originalData.qrCodeData2 || null;
+                            const qrOrder = originalData.qrOrder || null;
+                            openQrManagementModal(path, target, qrCodeData1, qrCodeData2, qrOrder);
                         };
                     } catch (error) {
                         console.error('获取数据失败:', error);
@@ -1669,8 +1683,12 @@
                 editBtn.onclick = () => toggleEditMode(row);
                 deleteBtn.onclick = () => deleteMapping(originalData.path);
                 qrBtn.onclick = () => {
-                    // 目前只传递一个URL，第二个URL的逻辑待定
-                    generateQRForMapping(window.location.origin + '/' + originalData.path, originalData.path, null, null);
+                    const path = originalData.path;
+                    const target = originalData.target;
+                    const qrCodeData1 = originalData.qrCodeData1 || null;
+                    const qrCodeData2 = originalData.qrCodeData2 || null;
+                    const qrOrder = originalData.qrOrder || null;
+                    openQrManagementModal(path, target, qrCodeData1, qrCodeData2, qrOrder);
                 };
 
                 row.classList.remove('editing');
@@ -1913,49 +1931,205 @@
                 }
             }
 
-            // New function to handle QR upload within the modal
-            async function handleModalQRUpload(event, mappingPath) {
-                const fileInput = event.target;
-                const slot = fileInput.dataset.slot; // "1" or "2"
-                const file = fileInput.files[0];
-
-                if (!file) return;
-
-                if (!file.type.startsWith('image/')) {
-                    showAlert('请上传图片文件 (Please upload an image file)', 'error');
-                    fileInput.value = ''; // Reset file input
-                    return;
+            // 打开和管理二维码的模态框
+            async function openQrManagementModal(path, targetUrl, qrCodeData1, qrCodeData2, qrOrder) {
+                // 处理文件上传 (此函数现在在 openQrManagementModal 内部)
+                async function handleFileUploadInModal(event, qrSlot) {
+                    const file = event.target.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            const imageDataUrl = e.target.result;
+                            if (qrSlot === 1) {
+                                currentQrCodeData1 = imageDataUrl;
+                                renderQRCode(qrCanvas1, currentQrCodeData1);
+                                qrUrl1Input.value = '自定义图片已上传';
+                            } else if (qrSlot === 2) {
+                                currentQrCodeData2 = imageDataUrl;
+                                renderQRCode(qrCanvas2, currentQrCodeData2);
+                                qrUrl2Input.value = '自定义图片已上传';
+                            }
+                            // 将上传的图片数据暂存到模态框的dataset中，如果需要的话
+                            // if(modal) modal.dataset[`customQrSlot${qrSlot}Data`] = imageDataUrl;
+                        };
+                        reader.readAsDataURL(file);
+                    }
                 }
 
-                const reader = new FileReader();
-                reader.onload = async (e) => {
-                    const imageData = e.target.result; // base64 image data
-                    const qrCanvasContainer = document.getElementById(`qr-canvas-${slot}`);
-                    if (qrCanvasContainer) {
-                        qrCanvasContainer.innerHTML = ''; // Clear previous content (generated QR or previous image)
-                        const img = document.createElement('img');
-                        img.src = imageData;
-                        // Ensure the image fills the container while maintaining aspect ratio
-                        img.className = 'w-full h-full object-contain'; 
-                        qrCanvasContainer.appendChild(img);
-                        showAlert(`自定义二维码 ${slot} 已加载预览。更改将在保存短链时生效。`, 'info');
-                    } else {
-                        console.error(`QR canvas container for slot ${slot} not found.`);
-                        showAlert(`无法加载二维码 ${slot} 的预览。`, 'error');
-                    }
+                const modal = document.getElementById('qr-modal');
+                const qrCanvas1 = document.getElementById('qr-canvas-1');
+                const qrCanvas2 = document.getElementById('qr-canvas-2');
+                const qrUploadInput1 = document.getElementById('qr-upload-input-1');
+                const qrUploadBtn1 = document.getElementById('qr-upload-btn-1');
+                const qrUploadInput2 = document.getElementById('qr-upload-input-2');
+                const qrUploadBtn2 = document.getElementById('qr-upload-btn-2');
+                const qrUrl1Input = document.getElementById('qr-url-1');
+                const qrUrl2Input = document.getElementById('qr-url-2');
+                const saveQrChangesBtn = document.getElementById('save-qr-changes-btn'); 
+                const qrSortableArea = document.getElementById('qr-sortable-area');
+                const permanentQrContainerInModal = document.getElementById('qr-container-permanent'); // 永久二维码容器
 
-                    // Store this imageData for actual saving later.
-                    // For example, attach to a global object or modal's dataset, keyed by mappingPath and slot.
-                    // This part needs to be integrated with the overall mapping save/update logic.
-                    console.log(`Custom QR for slot ${slot} (path ${mappingPath}) loaded:`, imageData.substring(0, 100) + "...");
-                    // Mark that this slot has a custom uploaded QR
-                    if(modal) modal.dataset[`customQrSlot${slot}Data`] = imageData;
+                // 存储当前的二维码数据和顺序，以便后续保存
+                let currentQrCodeData1 = qrCodeData1;
+                let currentQrCodeData2 = qrCodeData2;
+                let currentQrOrder = qrOrder || 'permanent,1,2'; // 默认顺序，包括永久二维码
+                
+                // 为模态框的保存按钮设置当前path，以便保存时使用
+                if(saveQrChangesBtn) saveQrChangesBtn.dataset.currentPath = path;
+
+                // 清空之前的二维码和URL
+                qrCanvas1.innerHTML = '';
+                qrCanvas2.innerHTML = '';
+                if(permanentQrContainerInModal) permanentQrContainerInModal.querySelector('#qr-canvas-permanent').innerHTML = '';
+                
+                qrUrl1Input.value = ''; 
+                qrUrl2Input.value = ''; 
+                if(permanentQrContainerInModal) permanentQrContainerInModal.querySelector('#qr-url-permanent').value = targetUrl;
+
+                // 渲染函数
+                function renderQRCode(canvasElement, data, placeholderText = '点击上传自定义二维码') {
+                    canvasElement.innerHTML = ''; // 清空
+                    if (data && data.startsWith('data:image')) {
+                        const img = document.createElement('img');
+                        img.src = data;
+                        img.className = 'w-full h-full object-contain rounded';
+                        canvasElement.appendChild(img);
+                    } else if (data) { // 假定是URL (用于永久二维码)
+                        new QRCodeStyling({
+                            width: 180,
+                            height: 180,
+                            type: 'canvas',
+                            data: data,
+                            dotsOptions: { color: "#000000", type: 'rounded' },
+                            backgroundOptions: { color: "#FFFFFF" },
+                            qrOptions: { errorCorrectionLevel: 'H' }
+                        }).append(canvasElement);
+                    } else {
+                        canvasElement.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs text-gray-500 p-2 text-center">${placeholderText}</div>`;
+                    }
+                }
+                
+                // 渲染永久二维码 (targetUrl) 到模态框中
+                if (permanentQrContainerInModal) {
+                    const permanentQrCanvas = permanentQrContainerInModal.querySelector('#qr-canvas-permanent');
+                    if (permanentQrCanvas) renderQRCode(permanentQrCanvas, targetUrl, '永久二维码 (不可更改)');
+                    const permanentQrUrlDisplay = permanentQrContainerInModal.querySelector('#qr-url-permanent');
+                    if (permanentQrUrlDisplay) permanentQrUrlDisplay.value = targetUrl;
+                }
+
+                // 渲染自定义二维码1
+                renderQRCode(qrCanvas1, currentQrCodeData1, '自定义二维码 1');
+                if (currentQrCodeData1 && !currentQrCodeData1.startsWith('data:image')) {
+                    qrUrl1Input.value = currentQrCodeData1; 
+                } else {
+                    qrUrl1Input.value = ''; // 如果是图片数据，URL框留空或提示
+                }
+
+                // 渲染自定义二维码2
+                renderQRCode(qrCanvas2, currentQrCodeData2, '自定义二维码 2');
+                if (currentQrCodeData2 && !currentQrCodeData2.startsWith('data:image')) {
+                    qrUrl2Input.value = currentQrCodeData2;
+                } else {
+                    qrUrl2Input.value = '';
+                }
+
+                // 为上传按钮和输入框设置事件监听器
+                // 通过克隆节点来移除可能存在的旧监听器，确保事件只被绑定一次
+                let newQrUploadBtn1 = qrUploadBtn1.cloneNode(true);
+                qrUploadBtn1.parentNode.replaceChild(newQrUploadBtn1, qrUploadBtn1);
+                qrUploadBtn1 = newQrUploadBtn1; // 更新原始变量指向新节点
+
+                let newQrUploadInput1 = qrUploadInput1.cloneNode(true);
+                qrUploadInput1.parentNode.replaceChild(newQrUploadInput1, qrUploadInput1);
+                qrUploadInput1 = newQrUploadInput1; // 更新原始变量指向新节点
+
+                let newQrUploadBtn2 = qrUploadBtn2.cloneNode(true);
+                qrUploadBtn2.parentNode.replaceChild(newQrUploadBtn2, qrUploadBtn2);
+                qrUploadBtn2 = newQrUploadBtn2; // 更新原始变量指向新节点
+
+                let newQrUploadInput2 = qrUploadInput2.cloneNode(true);
+                qrUploadInput2.parentNode.replaceChild(newQrUploadInput2, qrUploadInput2);
+                qrUploadInput2 = newQrUploadInput2; // 更新原始变量指向新节点
+
+                qrUploadBtn1.onclick = () => qrUploadInput1.click();
+                qrUploadInput1.onchange = (event) => handleFileUploadInModal(event, 1);
+
+                qrUploadBtn2.onclick = () => qrUploadInput2.click();
+                qrUploadInput2.onchange = (event) => handleFileUploadInModal(event, 2);
+
+                // 初始化拖拽排序
+                if (qrSortableArea) {
+                    if (Sortable.get(qrSortableArea)) {
+                        Sortable.get(qrSortableArea).destroy();
+                    }
+                    new Sortable(qrSortableArea, {
+                        animation: 150,
+                        ghostClass: 'bg-blue-100',
+                        draggable: '.draggable-qr-item', // 指定可拖拽的项
+                        store: {
+                            get: function (sortable) {
+                                return currentQrOrder ? currentQrOrder.split(',') : ['permanent','1', '2'];
+                            },
+                            set: function (sortable) {
+                                currentQrOrder = sortable.toArray().join(',');
+                                console.log('New QR order in modal:', currentQrOrder);
+                            }
+                        },
+                         // 确保初始顺序正确应用
+                        onSort: function() {
+                            const orderArray = this.toArray();
+                            currentQrOrder = orderArray.join(',');
+                        }
+                    });
+                    // 手动设置初始顺序
+                    const initialOrderArray = currentQrOrder ? currentQrOrder.split(',') : ['permanent', '1', '2'];
+                    const items = Array.from(qrSortableArea.children);
+                    const fragment = document.createDocumentFragment();
+                    initialOrderArray.forEach(id => {
+                        // id 会是 'permanent', '1', '2'
+                        const item = items.find(el => el.dataset.id === id );
+                        if (item) fragment.appendChild(item);
+                    });
+                    qrSortableArea.innerHTML = '';
+                    qrSortableArea.appendChild(fragment);
+                }
+
+                // 保存更改的逻辑 (确保只添加一次事件监听器)
+                const newSaveQrChangesBtn = saveQrChangesBtn.cloneNode(true);
+                saveQrChangesBtn.parentNode.replaceChild(newSaveQrChangesBtn, saveQrChangesBtn);
+
+                newSaveQrChangesBtn.onclick = async () => {
+                    const currentPath = newSaveQrChangesBtn.dataset.currentPath;
+                    if (!currentPath) {
+                        showAlert('无法确定当前操作的短链路径', 'error');
+                        return;
+                    }
+                    try {
+                        const response = await fetch('/api/mapping', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                path: currentPath, // 使用按钮上存储的path
+                                qrCodeData1: currentQrCodeData1,
+                                qrCodeData2: currentQrCodeData2,
+                                qrOrder: currentQrOrder
+                            })
+                        });
+                        if (response.ok) {
+                            showAlert('二维码信息更新成功', 'success');
+                            modal.close();
+                            loadMappings(); // 重新加载列表
+                        } else {
+                            const errorData = await response.json();
+                            showAlert(`更新失败: ${errorData.message || response.statusText}`, 'error');
+                        }
+                    } catch (error) {
+                        console.error('Error updating QR codes:', error);
+                        showAlert('更新二维码信息时出错', 'error');
+                    }
                 };
-                reader.onerror = () => {
-                    showAlert(`读取文件失败 (Failed to read file for QR ${slot})`, 'error');
-                    fileInput.value = ''; // Reset file input
-                };
-                reader.readAsDataURL(file);
+
+                modal.showModal();
             }
 
             // 处理二维码更换功能
@@ -2055,8 +2229,7 @@
             // function updateQRCode() { ... } // Kept for reference, but functionality moved
             // The global qrCode variable is also no longer needed as instances are managed within generateQRForMapping
             // let qrCode; // Remove this global variable
-
-        });
+        }); // This was missing, potentially closing an outer async IIFE or the main script function
     </script>
 </body>
 

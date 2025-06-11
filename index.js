@@ -174,10 +174,11 @@ async function createMapping(path, target, name, expiry, enabled = true, qrCodeD
   }
 
   // 验证 qrOrder 格式 (可选, 例如, 确保是 '1,2' 或 '2,1' 如果有值)
-  if (qrOrder && !/^[12],[12]$/.test(qrOrder) && qrOrder.split(',')[0] !== qrOrder.split(',')[1]) {
-    // Allow null or empty string for qrOrder if no specific order is set
-  } else if (qrOrder && (qrOrder.split(',').length !== 2 || new Set(qrOrder.split(',')).size !== 2 || !qrOrder.split(',').every(item => ['1', '2'].includes(item)))) {
-    throw new Error('Invalid qrOrder format. Must be like "1,2" or "2,1", or null.');
+  if (qrOrder && qrOrder.trim() !== '') { // Only validate if qrOrder is not null and not an empty string
+    const parts = qrOrder.split(',');
+    if (parts.length !== 2 || new Set(parts).size !== 2 || !parts.every(item => ['1', '2'].includes(item))) {
+      throw new Error('Invalid qrOrder format. Must be like "1,2" or "2,1".');
+    }
   }
 
   await DB.prepare(`
@@ -223,8 +224,11 @@ async function updateMapping(originalPath, newPath, target, name, expiry, enable
   }
 
   // 验证 qrOrder 格式 (可选)
-  if (qrOrder && (qrOrder.split(',').length !== 2 || new Set(qrOrder.split(',')).size !== 2 || !qrOrder.split(',').every(item => ['1', '2'].includes(item)))) {
-      throw new Error('Invalid qrOrder format. Must be like "1,2" or "2,1", or null.');
+  if (qrOrder && qrOrder.trim() !== '') { // Only validate if qrOrder is not null and not an empty string
+    const parts = qrOrder.split(',');
+    if (parts.length !== 2 || new Set(parts).size !== 2 || !parts.every(item => ['1', '2'].includes(item))) {
+      throw new Error('Invalid qrOrder format. Must be like "1,2" or "2,1".');
+    }
   }
 
   // If new QR data is not provided for a slot, retain existing data for that slot.
@@ -532,7 +536,7 @@ export default {
     if (path) {
       try {
         const mapping = await DB.prepare(`
-          SELECT path, target, name, expiry, enabled, isWechat, qrCodeData
+          SELECT path, target, name, expiry, enabled, qrCodeData1, qrCodeData2, qrOrder
           FROM mappings
           WHERE path = ?
         `).bind(path).first();
@@ -631,14 +635,45 @@ export default {
             }
           }
 
-          // 如果是微信二维码，返回活码页面
-          if (mapping.isWechat === 1 && mapping.qrCodeData) {
-            const wechatHtml = `<!DOCTYPE html>
+          // 生成包含多个二维码的HTML页面
+          let qrCodeHtml = '';
+          const qrImages = [];
+
+          // 1. 程序生成的永久二维码 (基于 target URL)
+          // 我们需要在客户端生成这个二维码，或者有一个API端点来生成它。
+          // 为了简单起见，我们假设客户端将使用库来生成它。
+          qrImages.push({ type: 'target', data: mapping.target, title: '永久二维码 (扫码跳转)' });
+
+          // 2. 用户配置的二维码 (qrCodeData1 和 qrCodeData2)
+          const configuredQRs = [];
+          if (mapping.qrCodeData1) {
+            configuredQRs.push({ id: '1', data: mapping.qrCodeData1, title: '二维码1' });
+          }
+          if (mapping.qrCodeData2) {
+            configuredQRs.push({ id: '2', data: mapping.qrCodeData2, title: '二维码2' });
+          }
+
+          if (mapping.qrOrder && configuredQRs.length > 1) {
+            const order = mapping.qrOrder.split(',');
+            configuredQRs.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+          }
+          qrImages.push(...configuredQRs.map(qr => ({ type: 'data', data: qr.data, title: qr.title })));
+          
+          qrCodeHtml = qrImages.map((qr, index) => `
+            <div class="qr-code-item">
+              <h2>${qr.title}</h2>
+              ${qr.type === 'data' ? `<img src="${qr.data}" alt="${qr.title}" class="qr-image">` : `<div id="qrcode-target-${index}" class="qr-image-placeholder"></div>`}
+              ${qr.type === 'target' ? `<p class="qr-comment">${qr.data}</p>` : ''}
+            </div>
+          `).join('');
+
+          const displayHtml = `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${mapping.name || '微信群二维码'}</title>
+    <title>${mapping.name || '二维码集合'}</title>
+    <script src="/qr-code-styling.js"></script>
     <style>
         :root {
             color-scheme: light dark;
@@ -648,93 +683,141 @@ export default {
             padding: 16px;
             min-height: 100vh;
             display: flex;
+            flex-direction: column;
+            align-items: center;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background: #f7f7f7;
             box-sizing: border-box;
         }
-        .container {
-            margin: auto;
-            padding: 24px 16px;
-            width: calc(100% - 32px);
-            max-width: 320px;
+        .page-title {
+            font-size: 28px;
+            font-weight: 600;
+            margin: 20px 0 30px;
+            color: #333;
             text-align: center;
+        }
+        .qr-code-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 30px;
+        }
+        .qr-code-item {
+            padding: 20px;
             background: white;
             border-radius: 12px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            text-align: center;
+            width: 300px; /* Fixed width for each QR item */
         }
-        .wechat-icon {
-            width: 32px;
-            height: 32px;
-            margin-bottom: 12px;
+        .qr-code-item h2 {
+            font-size: 18px;
+            font-weight: 500;
+            margin: 0 0 15px;
+            color: #444;
         }
-        .title {
-            font-size: 22px;
-            font-weight: 600;
-            margin: 0 0 8px;
-            color: #333;
-        }
-        .qr-code {
+        .qr-image, .qr-image-placeholder {
             width: 100%;
-            max-width: 240px;
+            max-width: 256px; /* Max width for QR code image */
+            height: auto;
+            min-height: 256px; /* Placeholder height */
             border-radius: 8px;
-            margin: 20px 0;
+            margin-bottom: 10px;
+            border: 1px solid #eee;
+            display: block; /* Ensure img is block to center with margin auto */
+            margin-left: auto;
+            margin-right: auto;
         }
-        .notice {
-            font-size: 16px;
-            color: #666;
-            margin: 16px 0 0;
-            line-height: 1.5;
+        .qr-image-placeholder {
+             display: flex;
+             align-items: center;
+             justify-content: center;
+             background-color: #f0f0f0;
         }
-        .footer {
+        .qr-comment {
+            font-size: 12px;
+            color: #777;
+            word-break: break-all;
+        }
+        .info {
             font-size: 14px;
             color: #999;
-            margin-top: 20px;
+            margin-top: 30px;
+            text-align: center;
         }
-
         @media (prefers-color-scheme: dark) {
             body {
                 background: #1a1a1a;
             }
-            .container {
+            .page-title {
+                color: #e0e0e0;
+            }
+            .qr-code-item {
                 background: #2a2a2a;
                 box-shadow: 0 2px 8px rgba(0,0,0,0.2);
             }
-            .title {
-                color: #e0e0e0;
+            .qr-code-item h2 {
+                color: #ccc;
             }
-            .notice {
-                color: #aaa;
+            .qr-image, .qr-image-placeholder {
+                border: 1px solid #444;
             }
-            .footer {
+            .qr-image-placeholder {
+                background-color: #3a3a3a;
+            }
+            .qr-comment {
+                color: #888;
+            }
+            .info {
                 color: #777;
-            }
-            .qr-code {
-                background: white;
-                padding: 8px;
             }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <img class="wechat-icon" src="wechat.svg" alt="WeChat">
-        <h1 class="title">${mapping.name ? mapping.name : '微信二维码'}</h1>
-        <p class="notice">请长按识别下方二维码</p>
-        <img class="qr-code" src="${mapping.qrCodeData}" alt="微信群二维码">
-        <p class="footer">二维码失效请联系作者更新</p>
+    <h1 class="page-title">${mapping.name || '扫描二维码'}</h1>
+    <div class="qr-code-container">
+        ${qrCodeHtml}
     </div>
+    ${mapping.expiry ? `<p class="info">此链接有效期至：${new Date(mapping.expiry).toLocaleDateString()}</p>` : ''}
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const qrImages = ${JSON.stringify(qrImages)};
+            qrImages.forEach((qr, index) => {
+                if (qr.type === 'target') {
+                    const qrCodeTargetElement = document.getElementById(\`qrcode-target-\${index}\`);
+                    if (qrCodeTargetElement) {
+                        new QRCodeStyling({
+                            width: 256,
+                            height: 256,
+                            data: qr.data,
+                            image: '/favicon.svg', // Optional: add a logo in the middle
+                            dotsOptions: {
+                                color: "#4267b2",
+                                type: "rounded"
+                            },
+                            backgroundOptions: {
+                                color: "#ffffff",
+                            },
+                            imageOptions: {
+                                crossOrigin: "anonymous",
+                                margin: 5
+                            }
+                        }).appendTo(qrCodeTargetElement);
+                    }
+                }
+            });
+        });
+    </script>
 </body>
 </html>`;
-            return new Response(wechatHtml, {
-              headers: {
-                'Content-Type': 'text/html;charset=UTF-8',
-                'Cache-Control': 'no-store'
-              }
-            });
-          }
 
-          // 如果不是微信二维码，执行普通重定向
-          return Response.redirect(mapping.target, 302);
+          return new Response(displayHtml, {
+            headers: {
+              'Content-Type': 'text/html;charset=UTF-8',
+              'Cache-Control': 'public, max-age=300' // Cache for 5 minutes
+            }
+          });
         }
         return new Response('Not Found', { status: 404 });
       } catch (error) {
