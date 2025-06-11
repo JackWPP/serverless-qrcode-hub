@@ -32,6 +32,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link href="/daisyui@5.css" rel="stylesheet" type="text/css" />
     <script src="/tailwindcss@4.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -272,14 +273,18 @@
                 <button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button>
             </form>
             <h3 class="font-bold text-lg mb-4">二维码</h3>
-            <div class="flex justify-around mb-4">
-                <div id="qr-container-1" class="flex flex-col items-center">
+            <div id="qr-sortable-area" class="flex justify-around mb-4">
+                <div id="qr-container-1" class="flex flex-col items-center p-2 border border-dashed border-gray-300 rounded cursor-grab">
                     <p class="text-sm font-semibold mb-2">二维码 1</p>
-                    <div id="qr-canvas-1"></div>
+                    <div id="qr-canvas-1" class="w-48 h-48 bg-white rounded-lg shadow-md mx-auto mb-2"></div>
+                    <input type="file" id="qr-upload-input-1" data-slot="1" class="hidden" accept="image/*">
+                    <button id="qr-upload-btn-1" data-slot="1" class="btn btn-sm btn-outline mt-1 w-full">Upload Custom QR 1</button>
                 </div>
-                <div id="qr-container-2" class="flex flex-col items-center">
+                <div id="qr-container-2" class="flex flex-col items-center p-2 border border-dashed border-gray-300 rounded cursor-grab">
                     <p class="text-sm font-semibold mb-2">二维码 2</p>
-                    <div id="qr-canvas-2"></div>
+                    <div id="qr-canvas-2" class="w-48 h-48 bg-white rounded-lg shadow-md mx-auto mb-2"></div>
+                    <input type="file" id="qr-upload-input-2" data-slot="2" class="hidden" accept="image/*">
+                    <button id="qr-upload-btn-2" data-slot="2" class="btn btn-sm btn-outline mt-1 w-full">Upload Custom QR 2</button>
                 </div>
             </div>
             <div class="mb-4">
@@ -617,6 +622,19 @@
                 }
             }            // 页面初始化函数
             function initializePage() {
+                // 初始化拖拽排序
+                const sortableArea = document.getElementById('qr-sortable-area');
+                if (sortableArea) {
+                    new Sortable(sortableArea, {
+                        animation: 150,
+                        ghostClass: 'bg-blue-100',
+                        // onEnd: function (evt) {
+                            // console.log('Item dragged from', evt.oldIndex, 'to', evt.newIndex);
+                            // 在这里可以添加保存排序顺序的逻辑
+                        // }
+                    });
+                }
+
                 // 将原有的初始化代码移到这里
                 document.getElementById('logoutBtn').addEventListener('click', logout);
                 document.getElementById('addMappingBtn').addEventListener('click', addMapping);
@@ -1149,6 +1167,45 @@
 
                     // 显示模态框
                     modal.showModal();
+
+                // Event listeners for custom QR uploads in the modal
+                const uploadBtn1 = document.getElementById('qr-upload-btn-1');
+                const uploadInput1 = document.getElementById('qr-upload-input-1');
+                const uploadBtn2 = document.getElementById('qr-upload-btn-2');
+                const uploadInput2 = document.getElementById('qr-upload-input-2');
+
+                if (uploadBtn1 && uploadInput1) {
+                    uploadBtn1.onclick = () => uploadInput1.click();
+                    uploadInput1.onchange = (event) => handleModalQRUpload(event, path1); 
+                }
+                if (uploadBtn2 && uploadInput2) {
+                    uploadBtn2.onclick = () => uploadInput2.click();
+                    uploadInput2.onchange = (event) => handleModalQRUpload(event, path1); 
+                }
+
+                // Initialize SortableJS for QR code reordering
+                const sortableArea = document.getElementById('qr-sortable-area');
+                if (sortableArea) {
+                    new Sortable(sortableArea, {
+                        animation: 150,
+                        ghostClass: 'bg-blue-100',
+                        // Element dragging ended
+                        onEnd: function (/**Event*/evt) {
+                            // var itemEl = evt.item;  // dragged HTMLElement
+                            // evt.to;    // target list
+                            // evt.from;  // previous list
+                            // evt.oldIndex;  // element's old index within old parent
+                            // evt.newIndex;  // element's new index within new parent
+                            // evt.oldDraggableIndex; // element's old index within old parent, only counting draggable elements
+                            // evt.newDraggableIndex; // element's new index within new parent, only counting draggable elements
+                            // evt.clone // the clone element
+                            // evt.pullMode;  // when item is in another sortable: "clone" if cloning, true if moving
+                            console.log('QR order changed:', evt.oldIndex, '->', evt.newIndex);
+                            // TODO: Store the new order (e.g., update an array representing the order)
+                            // This order then needs to be saved to the backend.
+                        },
+                    });
+                }
                 });
             }
 
@@ -1285,6 +1342,45 @@
 
                 // 显示模态框
                 modal.showModal();
+
+                // Event listeners for custom QR uploads in the modal
+                const uploadBtn1 = document.getElementById('qr-upload-btn-1');
+                const uploadInput1 = document.getElementById('qr-upload-input-1');
+                const uploadBtn2 = document.getElementById('qr-upload-btn-2');
+                const uploadInput2 = document.getElementById('qr-upload-input-2');
+
+                if (uploadBtn1 && uploadInput1) {
+                    uploadBtn1.onclick = () => uploadInput1.click();
+                    uploadInput1.onchange = (event) => handleModalQRUpload(event, path1); 
+                }
+                if (uploadBtn2 && uploadInput2) {
+                    uploadBtn2.onclick = () => uploadInput2.click();
+                    uploadInput2.onchange = (event) => handleModalQRUpload(event, path1); 
+                }
+
+                // Initialize SortableJS for QR code reordering
+                const sortableArea = document.getElementById('qr-sortable-area');
+                if (sortableArea) {
+                    new Sortable(sortableArea, {
+                        animation: 150,
+                        ghostClass: 'bg-blue-100',
+                        // Element dragging ended
+                        onEnd: function (/**Event*/evt) {
+                            // var itemEl = evt.item;  // dragged HTMLElement
+                            // evt.to;    // target list
+                            // evt.from;  // previous list
+                            // evt.oldIndex;  // element's old index within old parent
+                            // evt.newIndex;  // element's new index within new parent
+                            // evt.oldDraggableIndex; // element's old index within old parent, only counting draggable elements
+                            // evt.newDraggableIndex; // element's new index within new parent, only counting draggable elements
+                            // evt.clone // the clone element
+                            // evt.pullMode;  // when item is in another sortable: "clone" if cloning, true if moving
+                            console.log('QR order changed:', evt.oldIndex, '->', evt.newIndex);
+                            // TODO: Store the new order (e.g., update an array representing the order)
+                            // This order then needs to be saved to the backend.
+                        },
+                    });
+                }
             }
 
             // 修改创建短链二维码行的函数中的二维码按钮部分
@@ -1815,6 +1911,51 @@
                     skeleton.classList.add('hidden');
                     tableBody.style.display = '';
                 }
+            }
+
+            // New function to handle QR upload within the modal
+            async function handleModalQRUpload(event, mappingPath) {
+                const fileInput = event.target;
+                const slot = fileInput.dataset.slot; // "1" or "2"
+                const file = fileInput.files[0];
+
+                if (!file) return;
+
+                if (!file.type.startsWith('image/')) {
+                    showAlert('请上传图片文件 (Please upload an image file)', 'error');
+                    fileInput.value = ''; // Reset file input
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const imageData = e.target.result; // base64 image data
+                    const qrCanvasContainer = document.getElementById(`qr-canvas-${slot}`);
+                    if (qrCanvasContainer) {
+                        qrCanvasContainer.innerHTML = ''; // Clear previous content (generated QR or previous image)
+                        const img = document.createElement('img');
+                        img.src = imageData;
+                        // Ensure the image fills the container while maintaining aspect ratio
+                        img.className = 'w-full h-full object-contain'; 
+                        qrCanvasContainer.appendChild(img);
+                        showAlert(`自定义二维码 ${slot} 已加载预览。更改将在保存短链时生效。`, 'info');
+                    } else {
+                        console.error(`QR canvas container for slot ${slot} not found.`);
+                        showAlert(`无法加载二维码 ${slot} 的预览。`, 'error');
+                    }
+
+                    // Store this imageData for actual saving later.
+                    // For example, attach to a global object or modal's dataset, keyed by mappingPath and slot.
+                    // This part needs to be integrated with the overall mapping save/update logic.
+                    console.log(`Custom QR for slot ${slot} (path ${mappingPath}) loaded:`, imageData.substring(0, 100) + "...");
+                    // Mark that this slot has a custom uploaded QR
+                    if(modal) modal.dataset[`customQrSlot${slot}Data`] = imageData;
+                };
+                reader.onerror = () => {
+                    showAlert(`读取文件失败 (Failed to read file for QR ${slot})`, 'error');
+                    fileInput.value = ''; // Reset file input
+                };
+                reader.readAsDataURL(file);
             }
 
             // 处理二维码更换功能

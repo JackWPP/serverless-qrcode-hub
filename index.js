@@ -28,20 +28,46 @@ async function initDatabase() {
   const tableInfo = await DB.prepare("PRAGMA table_info(mappings)").all();
   const columns = tableInfo.results.map(col => col.name);
 
-  // 添加 isWechat 列（如果不存在）
-  if (!columns.includes('isWechat')) {
+  // 添加 qrCodeData1 列（如果不存在）
+  if (!columns.includes('qrCodeData1')) {
     await DB.prepare(`
       ALTER TABLE mappings 
-      ADD COLUMN isWechat INTEGER DEFAULT 0
+      ADD COLUMN qrCodeData1 TEXT
     `).run();
   }
 
-  // 添加 qrCodeData 列（如果不存在）
-  if (!columns.includes('qrCodeData')) {
+  // 添加 qrCodeData2 列（如果不存在）
+  if (!columns.includes('qrCodeData2')) {
     await DB.prepare(`
       ALTER TABLE mappings 
-      ADD COLUMN qrCodeData TEXT
+      ADD COLUMN qrCodeData2 TEXT
     `).run();
+  }
+
+  // 添加 qrOrder 列（如果不存在）
+  if (!columns.includes('qrOrder')) {
+    await DB.prepare(`
+      ALTER TABLE mappings 
+      ADD COLUMN qrOrder TEXT
+    `).run();
+  }
+
+  // 移除旧的 isWechat 和 qrCodeData 列（如果存在）
+  // 注意：ALTER TABLE DROP COLUMN 在某些 SQLite 版本中可能不受支持或行为有所不同。
+  // Cloudflare D1 基于 SQLite，通常支持。
+  if (columns.includes('isWechat')) {
+    try {
+      await DB.prepare(`ALTER TABLE mappings DROP COLUMN isWechat`).run();
+    } catch (e) {
+      console.warn("Could not drop column isWechat (it might be in use or not supported directly, consider manual migration if issues persist):", e.message);
+    }
+  }
+  if (columns.includes('qrCodeData')) {
+    try {
+      await DB.prepare(`ALTER TABLE mappings DROP COLUMN qrCodeData`).run();
+    } catch (e) {
+      console.warn("Could not drop column qrCodeData (it might be in use or not supported directly, consider manual migration if issues persist):", e.message);
+    }
   }
 
   // 添加索引
@@ -118,8 +144,9 @@ async function listMappings(page = 1, pageSize = 10) {
       name: row.name,
       expiry: row.expiry,
       enabled: row.enabled === 1,
-      isWechat: row.isWechat === 1,
-      qrCodeData: row.qrCodeData
+      qrCodeData1: row.qrCodeData1,
+      qrCodeData2: row.qrCodeData2,
+      qrOrder: row.qrOrder
     };
   }
 
@@ -132,7 +159,7 @@ async function listMappings(page = 1, pageSize = 10) {
   };
 }
 
-async function createMapping(path, target, name, expiry, enabled = true, isWechat = false, qrCodeData = null) {
+async function createMapping(path, target, name, expiry, enabled = true, qrCodeData1 = null, qrCodeData2 = null, qrOrder = null) {
   if (!path || !target || typeof path !== 'string' || typeof target !== 'string') {
     throw new Error('Invalid input');
   }
@@ -146,22 +173,25 @@ async function createMapping(path, target, name, expiry, enabled = true, isWecha
     throw new Error('Invalid expiry date');
   }
 
-  // 如果是微信二维码，必须提供二维码数据
-  if (isWechat && !qrCodeData) {
-    throw new Error('微信二维码必须提供原始二维码数据');
+  // 验证 qrOrder 格式 (可选, 例如, 确保是 '1,2' 或 '2,1' 如果有值)
+  if (qrOrder && !/^[12],[12]$/.test(qrOrder) && qrOrder.split(',')[0] !== qrOrder.split(',')[1]) {
+    // Allow null or empty string for qrOrder if no specific order is set
+  } else if (qrOrder && (qrOrder.split(',').length !== 2 || new Set(qrOrder.split(',')).size !== 2 || !qrOrder.split(',').every(item => ['1', '2'].includes(item)))) {
+    throw new Error('Invalid qrOrder format. Must be like "1,2" or "2,1", or null.');
   }
 
   await DB.prepare(`
-    INSERT INTO mappings (path, target, name, expiry, enabled, isWechat, qrCodeData)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO mappings (path, target, name, expiry, enabled, qrCodeData1, qrCodeData2, qrOrder)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     path,
     target,
     name || null,
     expiry || null,
     enabled ? 1 : 0,
-    isWechat ? 1 : 0,
-    qrCodeData
+    qrCodeData1,
+    qrCodeData2,
+    qrOrder
   ).run();
 }
 
@@ -178,7 +208,7 @@ async function deleteMapping(path) {
   await DB.prepare('DELETE FROM mappings WHERE path = ?').bind(path).run();
 }
 
-async function updateMapping(originalPath, newPath, target, name, expiry, enabled = true, isWechat = false, qrCodeData = null) {
+async function updateMapping(originalPath, newPath, target, name, expiry, enabled = true, qrCodeData1 = null, qrCodeData2 = null, qrOrder = null) {
   if (!originalPath || !newPath || !target) {
     throw new Error('Invalid input');
   }
@@ -192,27 +222,26 @@ async function updateMapping(originalPath, newPath, target, name, expiry, enable
     throw new Error('Invalid expiry date');
   }
 
-  // 如果没有提供新的二维码数据，获取原有的二维码数据
-  if (!qrCodeData && isWechat) {
-    const existingMapping = await DB.prepare(`
-      SELECT qrCodeData
-      FROM mappings
-      WHERE path = ?
-    `).bind(originalPath).first();
-
-    if (existingMapping) {
-      qrCodeData = existingMapping.qrCodeData;
-    }
+  // 验证 qrOrder 格式 (可选)
+  if (qrOrder && (qrOrder.split(',').length !== 2 || new Set(qrOrder.split(',')).size !== 2 || !qrOrder.split(',').every(item => ['1', '2'].includes(item)))) {
+      throw new Error('Invalid qrOrder format. Must be like "1,2" or "2,1", or null.');
   }
 
-  // 如果是微信二维码，必须有二维码数据
-  if (isWechat && !qrCodeData) {
-    throw new Error('微信二维码必须提供原始二维码数据');
-  }
+  // If new QR data is not provided for a slot, retain existing data for that slot.
+  // This requires fetching the existing record first if partial updates are desired.
+  // For simplicity in this step, we'll assume the frontend sends all three (qrCodeData1, qrCodeData2, qrOrder) 
+  // or nulls for fields to be cleared. If a more granular update is needed (e.g. only update qrCodeData1),
+  // this logic would need to be more complex, fetching existing values first.
+  
+  // Example: If you want to preserve old values if new ones are null:
+  // const existing = await DB.prepare(`SELECT qrCodeData1, qrCodeData2, qrOrder FROM mappings WHERE path = ?`).bind(originalPath).first();
+  // qrCodeData1 = qrCodeData1 === undefined ? existing?.qrCodeData1 : qrCodeData1;
+  // qrCodeData2 = qrCodeData2 === undefined ? existing?.qrCodeData2 : qrCodeData2;
+  // qrOrder = qrOrder === undefined ? existing?.qrOrder : qrOrder; 
 
   const stmt = DB.prepare(`
     UPDATE mappings 
-    SET path = ?, target = ?, name = ?, expiry = ?, enabled = ?, isWechat = ?, qrCodeData = ?
+    SET path = ?, target = ?, name = ?, expiry = ?, enabled = ?, qrCodeData1 = ?, qrCodeData2 = ?, qrOrder = ?
     WHERE path = ?
   `);
 
@@ -222,8 +251,9 @@ async function updateMapping(originalPath, newPath, target, name, expiry, enable
     name || null,
     expiry || null,
     enabled ? 1 : 0,
-    isWechat ? 1 : 0,
-    qrCodeData,
+    qrCodeData1,
+    qrCodeData2,
+    qrOrder,
     originalPath
   ).run();
 }
@@ -249,7 +279,7 @@ async function getExpiringMappings() {
   const results = await DB.prepare(`
     WITH categorized_mappings AS (
       SELECT 
-        path, name, target, expiry, enabled, isWechat, qrCodeData,
+        path, name, target, expiry, enabled, qrCodeData1, qrCodeData2, qrOrder,
         CASE 
           WHEN datetime(expiry) < datetime(?) THEN 'expired'
           WHEN datetime(expiry) <= datetime(?) THEN 'expiring'
@@ -275,8 +305,9 @@ async function getExpiringMappings() {
       target: row.target,
       expiry: row.expiry,
       enabled: row.enabled === 1,
-      isWechat: row.isWechat === 1,
-      qrCodeData: row.qrCodeData
+      qrCodeData1: row.qrCodeData1,
+      qrCodeData2: row.qrCodeData2,
+      qrOrder: row.qrOrder
     };
 
     if (row.status === 'expired') {
@@ -339,8 +370,9 @@ async function migrateFromKV() {
               value.name,
               value.expiry,
               value.enabled,
-              value.isWechat,
-              value.qrCodeData
+              null, // qrCodeData1 - KV didn't have this
+              null, // qrCodeData2 - KV didn't have this
+              null  // qrOrder - KV didn't have this
             );
           } catch (e) {
             console.error(`Failed to migrate ${key.name}:`, e);
@@ -429,7 +461,7 @@ export default {
             }
 
             const mapping = await DB.prepare(`
-              SELECT path, target, name, expiry, enabled, isWechat, qrCodeData
+              SELECT path, target, name, expiry, enabled, qrCodeData1, qrCodeData2, qrOrder
               FROM mappings
               WHERE path = ?
             `).bind(mappingPath).first();
@@ -448,7 +480,7 @@ export default {
           // 创建映射
           if (request.method === 'POST') {
             const data = await request.json();
-            await createMapping(data.path, data.target, data.name, data.expiry, data.enabled, data.isWechat, data.qrCodeData);
+            await createMapping(data.path, data.target, data.name, data.expiry, data.enabled, data.qrCodeData1, data.qrCodeData2, data.qrOrder);
             return new Response(JSON.stringify({ success: true }), {
               headers: { 'Content-Type': 'application/json' }
             });
@@ -464,8 +496,9 @@ export default {
               data.name,
               data.expiry,
               data.enabled,
-              data.isWechat,
-              data.qrCodeData
+              data.qrCodeData1,
+              data.qrCodeData2,
+              data.qrOrder
             );
             return new Response(JSON.stringify({ success: true }), {
               headers: { 'Content-Type': 'application/json' }
@@ -482,45 +515,6 @@ export default {
           }
         }
 
-        // 更换二维码图片
-        if (path === 'api/update-qr-code') {
-          if (request.method === 'PUT') {
-            const data = await request.json();
-            
-            // 验证输入参数
-            if (!data.path || !data.qrCodeData) {
-              return new Response(JSON.stringify({ error: '缺少必要参数' }), {
-                status: 400,
-                headers: { 'Content-Type': 'application/json' }
-              });
-            }
-
-            // 检查映射是否存在
-            const existingMapping = await DB.prepare(`
-              SELECT path, target, name, expiry, enabled, isWechat
-              FROM mappings
-              WHERE path = ?
-            `).bind(data.path).first();
-
-            if (!existingMapping) {
-              return new Response(JSON.stringify({ error: '短链不存在' }), {
-                status: 404,
-                headers: { 'Content-Type': 'application/json' }
-              });
-            }
-
-            // 更新二维码数据并设置为微信二维码
-            await DB.prepare(`
-              UPDATE mappings 
-              SET qrCodeData = ?, isWechat = 1
-              WHERE path = ?
-            `).bind(data.qrCodeData, data.path).run();
-
-            return new Response(JSON.stringify({ success: true }), {
-              headers: { 'Content-Type': 'application/json' }
-            });
-          }
-        }
 
         return new Response('Not Found', { status: 404 });
       } catch (error) {
