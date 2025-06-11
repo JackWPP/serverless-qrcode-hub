@@ -1466,77 +1466,48 @@
             async function toggleEditMode(row) {
                 const isEditing = row.classList.toggle('editing');
                 const cells = row.cells;
-                const originalData = JSON.parse(row.dataset.originalData);
+                // 备份进入编辑模式时的原始数据，用于 fetch 失败时恢复
+                const initialOriginalData = JSON.parse(row.dataset.originalData);
 
                 if (isEditing) {
                     try {
-                        // 获取当前行的完整数据
-                        const response = await fetch(`/api/mapping?path=${originalData.path}`);
+                        // 获取当前行的最新、最完整数据，包括二维码相关字段
+                        const response = await fetch(`/api/mapping?path=${initialOriginalData.path}`);
                         if (!response.ok) {
-                            throw new Error('获取数据失败');
+                            const errorData = await response.json().catch(() => ({ message: '获取详细数据失败，请重试' }));
+                            throw new Error(errorData.message || '获取详细数据失败，请重试');
                         }
-                        const mappingData = await response.json();
+                        const mappingDataFromServer = await response.json();
+                        
+                        // 将从服务器获取的最新数据更新到 row.dataset.originalData
+                        // 这样后续的 saveEdit, restoreRow (取消时) 以及二维码按钮都能使用这份最新数据
+                        row.dataset.originalData = JSON.stringify(mappingDataFromServer);
 
-                        // 切换到编辑模式
-                        cells[0].innerHTML = `<input type="text" class="input input-bordered input-sm w-full" value="${mappingData.name || ''}">`;
-                        cells[1].innerHTML = `<input type="text" class="input input-bordered input-sm w-full" value="${mappingData.path}">`;
-                        cells[2].innerHTML = `<textarea class="textarea textarea-bordered textarea-sm w-full h-24" style="resize:none; word-break:break-all;">${mappingData.target}</textarea>`;
-                        cells[3].innerHTML = `<input type="date" class="input input-bordered input-sm w-full" value="${mappingData.expiry || ''}">`;
-                          // 状态切换
+                        // 切换到编辑模式，使用 mappingDataFromServer 填充字段
+                        cells[0].innerHTML = `<input type="text" class="input input-bordered input-sm w-full" value="${mappingDataFromServer.name || ''}">`;
+                        cells[1].innerHTML = `<input type="text" class="input input-bordered input-sm w-full" value="${mappingDataFromServer.path}">`;
+                        cells[2].innerHTML = `<textarea class="textarea textarea-bordered textarea-sm w-full h-24" style="resize:none; word-break:break-all;">${mappingDataFromServer.target}</textarea>`;
+                        // 使用 datetime-local 以便编辑时间，并正确处理 expiry 格式
+                        cells[3].innerHTML = `<input type="datetime-local" class="input input-bordered input-sm w-full" value="${mappingDataFromServer.expiry ? mappingDataFromServer.expiry.slice(0, 16) : ''}">`;
+                        
+                        // 状态切换 - 简化微信二维码部分，因为管理在模态框中
                         cells[4].innerHTML = `
                             <div class="flex flex-col gap-2">
                                 <label class="cursor-pointer label justify-start gap-2">
-                                    <input type="checkbox" class="toggle toggle-primary toggle-sm" ${mappingData.enabled ? 'checked' : ''}>
+                                    <input type="checkbox" class="toggle toggle-primary toggle-sm" ${mappingDataFromServer.enabled ? 'checked' : ''}>
                                     <span class="label-text">启用</span>
-                                </label>                                <label class="cursor-pointer label justify-start gap-2">
-                                    <input type="checkbox" class="toggle toggle-primary toggle-sm" ${mappingData.isWechat ? 'checked' : ''}>
+                                </label>
+                                <label class="cursor-pointer label justify-start gap-2">
+                                    <input type="checkbox" class="toggle toggle-primary toggle-sm" ${mappingDataFromServer.isWechat ? 'checked' : ''}>
                                     <span class="label-text">微信</span>
                                 </label>
-                                ${mappingData.isWechat || !mappingData.qrCodeData ? `
-                                <div class="mt-2">
-                                    <label class="label">
-                                        <span class="label-text text-xs">${mappingData.isWechat ? '更换二维码' : '上传二维码'}</span>
-                                    </label>
-                                    <input type="file" accept="image/*" class="file-input file-input-bordered file-input-xs w-full qr-update-input" data-path="${mappingData.path}">
-                                    <div class="text-xs text-gray-500 mt-1">${mappingData.isWechat ? '上传新的二维码图片' : '上传二维码以启用微信模式'}</div>
+                                ${ (mappingDataFromServer.qrCodeData1 || mappingDataFromServer.qrCodeData2) ? `
+                                <div class="mt-2 p-2 border rounded">
+                                    <p class="text-xs text-gray-600">自定义二维码已设置</p>
+                                    <p class="text-xs text-gray-500">(通过"二维码"按钮管理)</p>
                                 </div>
                                 ` : ''}
-                            </div>                        `;
-
-                        // 添加微信二维码切换监听器
-                        const wechatToggle = cells[4].querySelectorAll('input[type="checkbox"]')[1];
-                        if (wechatToggle) {
-                            wechatToggle.addEventListener('change', function() {
-                                const statusDiv = cells[4].querySelector('div');
-                                const isWechat = this.checked;
-                                
-                                // 重新构建状态区域HTML
-                                statusDiv.innerHTML = `
-                                    <label class="cursor-pointer label justify-start gap-2">
-                                        <input type="checkbox" class="toggle toggle-primary toggle-sm" ${cells[4].querySelector('input[type="checkbox"]').checked ? 'checked' : ''}>
-                                        <span class="label-text">启用</span>
-                                    </label>
-                                    <label class="cursor-pointer label justify-start gap-2">
-                                        <input type="checkbox" class="toggle toggle-primary toggle-sm" ${isWechat ? 'checked' : ''}>
-                                        <span class="label-text">微信</span>
-                                    </label>                                    ${isWechat || !mappingData.qrCodeData ? `
-                                    <div class="mt-2">
-                                        <label class="label">
-                                            <span class="label-text text-xs">${isWechat ? '更换二维码' : '上传二维码'}</span>
-                                        </label>
-                                        <input type="file" accept="image/*" class="file-input file-input-bordered file-input-xs w-full qr-update-input" data-path="${mappingData.path}">
-                                        <div class="text-xs text-gray-500 mt-1">${isWechat ? '上传新的二维码图片' : '上传二维码以启用微信模式'}</div>
-                                    </div>
-                                    ` : ''}
-                                `;
-                                
-                                // 重新绑定微信切换监听器
-                                const newWechatToggle = statusDiv.querySelectorAll('input[type="checkbox"]')[1];
-                                if (newWechatToggle) {
-                                    newWechatToggle.addEventListener('change', arguments.callee);
-                                }
-                            });
-                        }
+                            </div>`;
 
                         // 修改按钮组
                         const actionsCell = cells[5];
@@ -1551,120 +1522,134 @@
                         // 重新绑定事件监听器
                         const [saveBtn, cancelBtn, qrBtn] = actionsCell.querySelectorAll('button');
                         saveBtn.onclick = () => saveEdit(row);
+                        // 取消时，restoreRow 会使用 row.dataset.originalData，此刻它已被服务器数据更新
                         cancelBtn.onclick = () => restoreRow(row);
                         qrBtn.onclick = () => {
-                            const path = originalData.path;
-                            const target = originalData.target;
-                            // 从 mappingData 获取二维码数据，如果不存在则使用 null
-                            // 注意: mappingData 在这个上下文中可能未定义，需要确认数据来源
-                            // 暂时假设 originalData 包含这些字段，或者它们可以为 null
-                            const qrCodeData1 = originalData.qrCodeData1 || null;
-                            const qrCodeData2 = originalData.qrCodeData2 || null;
-                            const qrOrder = originalData.qrOrder || null;
-                            openQrManagementModal(path, target, qrCodeData1, qrCodeData2, qrOrder);
+                            // 使用已更新到 row.dataset.originalData 的服务器数据
+                            const currentMappingData = JSON.parse(row.dataset.originalData);
+                            openQrManagementModal(
+                                currentMappingData.path,
+                                currentMappingData.target, 
+                                currentMappingData.qrCodeData1 || null, 
+                                currentMappingData.qrCodeData2 || null, 
+                                currentMappingData.qrOrder || null
+                            );
                         };
                     } catch (error) {
-                        console.error('获取数据失败:', error);
-                        showAlert('获取数据失败，请重试');
-                        row.classList.remove('editing');
+                        console.error('进入编辑模式失败:', error);
+                        showAlert(error.message || '操作失败，请重试', 'error');
+                        // 如果 fetch 失败，originalData 还是初始的，用它来恢复
+                        row.dataset.originalData = JSON.stringify(initialOriginalData); // 确保恢复到最初状态
+                        restoreRow(row); 
+                        row.classList.remove('editing'); // 确保移除编辑状态
                     }
+                } else {
+                    // 如果是退出编辑模式 (toggle off)
+                    restoreRow(row);
                 }
             }
 
             async function saveEdit(row) {
                 const cells = row.cells;
-                const rowOriginalData = JSON.parse(row.dataset.originalData);
+                // row.dataset.originalData 此刻应为 toggleEditMode 中从服务器获取并更新的数据
+                const currentDataOnEditStart = JSON.parse(row.dataset.originalData);
 
                 const newName = cells[0].querySelector('input').value;
                 const newPath = cells[1].querySelector('input').value;
                 const newTarget = cells[2].querySelector('textarea').value;
-                const newExpiry = cells[3].querySelector('input').value;
-                const enabledToggle = cells[4].querySelector('input[type="checkbox"]');
+                const newExpiryInput = cells[3].querySelector('input').value; // 这是 datetime-local 的值
+                // 将 datetime-local 的值转换为 ISO 字符串，如果为空则为 null
+                const newExpiry = newExpiryInput ? new Date(newExpiryInput).toISOString() : null;
+
+                const enabledToggle = cells[4].querySelectorAll('input[type="checkbox"]')[0];
                 const isWechatToggle = cells[4].querySelectorAll('input[type="checkbox"]')[1];
                 const newEnabled = enabledToggle.checked;
                 const newIsWechat = isWechatToggle ? isWechatToggle.checked : false;
 
-                // 检查是否有任何修改
-                const hasChanges =
-                    newName !== rowOriginalData.name ||
-                    newPath !== rowOriginalData.path ||
-                    newTarget !== rowOriginalData.target ||
-                    newExpiry !== rowOriginalData.expiry ||
-                    newEnabled !== rowOriginalData.enabled ||
-                    (isWechatToggle && newIsWechat !== rowOriginalData.isWechat);
+                // 检查是否有任何非二维码相关的修改
+                const hasNonQrChanges =
+                    newName !== currentDataOnEditStart.name ||
+                    newPath !== currentDataOnEditStart.path ||
+                    newTarget !== currentDataOnEditStart.target ||
+                    // 比较 ISO 格式的日期，或两者都为 null
+                    (newExpiry !== (currentDataOnEditStart.expiry ? new Date(currentDataOnEditStart.expiry).toISOString() : null)) ||
+                    newEnabled !== currentDataOnEditStart.enabled ||
+                    newIsWechat !== currentDataOnEditStart.isWechat;
 
-                if (!hasChanges) {
-                    restoreRow(row);
+                if (!hasNonQrChanges) {
+                    showAlert('没有检测到修改。', 'info');
+                    restoreRow(row); // 恢复到编辑开始时的状态（已是服务器最新状态）
                     return;
                 }
 
                 try {
-                    // 获取原有数据
-                    const response = await fetch(`/api/mapping?path=${rowOriginalData.path}`);
-                    if (!response.ok) {
-                        throw new Error('获取原有数据失败');
-                    }
-                    const serverData = await response.json();
+                    // 保存更改 (不包括二维码数据，那些在模态框中单独保存)
+                    const updatePayload = {
+                        originalPath: currentDataOnEditStart.path, // 使用编辑开始时的路径作为查找依据
+                        path: newPath,
+                        target: newTarget,
+                        name: newName,
+                        expiry: newExpiry, // 发送 ISO 格式的日期或 null
+                        enabled: newEnabled,
+                        isWechat: newIsWechat,
+                        // qrCodeData1, qrCodeData2, qrOrder 不在这里更新，它们从 currentDataOnEditStart 中获取并由后端保留
+                        qrCodeData1: currentDataOnEditStart.qrCodeData1,
+                        qrCodeData2: currentDataOnEditStart.qrCodeData2,
+                        qrOrder: currentDataOnEditStart.qrOrder
+                    };
 
-                    // 保存更改
                     const updateResponse = await fetch('/api/mapping', {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            originalPath: rowOriginalData.path,
-                            path: newPath,
-                            target: newTarget,
-                            name: newName,
-                            expiry: newExpiry || null,
-                            enabled: newEnabled,
-                            isWechat: newIsWechat,
-                            qrCodeData: serverData.qrCodeData // 使用服务器返回的原始二维码数据
-                        })
+                        body: JSON.stringify(updatePayload)
                     });
 
                     if (!updateResponse.ok) {
-                        const data = await updateResponse.json();
-                        showAlert(data.message || data.error || '更新失败，请重试');
+                        const errorData = await updateResponse.json().catch(() => ({ message: '更新失败，请重试' }));
+                        showAlert(errorData.message || '更新失败，请重试', 'error');
                         return;
                     }
+                    
+                    const updatedDataFromServer = await updateResponse.json();
+                    // 更新成功后，用服务器返回的（可能已规范化的）数据更新 originalData
+                    row.dataset.originalData = JSON.stringify(updatedDataFromServer);
 
                     showAlert('更新成功', 'success');
-                    
-                    // 不再刷新整个页面，而是重新加载表格数据
-                    await loadMappings();
-                    
-                    // 如果当前在过期或即将过期的视图中，重新加载相应的数据
-                    const expiringBtn = document.getElementById('showExpiringBtn');
-                    const expiredBtn = document.getElementById('showExpiredBtn');
-                    
-                    if (expiringBtn.classList.contains('btn-warning')) {
-                        await loadExpiringMappings('expiring');
-                    } else if (expiredBtn.classList.contains('btn-error')) {
-                        await loadExpiringMappings('expired');
-                    }
+                    // restoreRow 会使用更新后的 row.dataset.originalData 来显示数据
+                    restoreRow(row);
+                    // 可选：如果需要立即看到列表中的变化（比如路径更改导致排序变化），则重新加载
+                    // await loadMappings(); 
+
                 } catch (error) {
                     console.error('更新失败:', error);
-                    showAlert('更新失败，请检查网络连接后重试');
+                    showAlert('更新操作失败，请检查网络连接或联系管理员。', 'error');
+                    // 出错时，也尝试用编辑开始时的数据恢复行显示
+                    restoreRow(row);
                 }
             }
 
             function restoreRow(row) {
                 const cells = row.cells;
-                const originalData = JSON.parse(row.dataset.originalData);
+                // originalData 此刻应该是 toggleEditMode 中从服务器获取并更新的数据，
+                // 或者是在 fetch 失败时恢复的 initialOriginalData, 
+                // 或者是在 saveEdit 成功后从服务器返回的最新数据
+                const dataToRestore = JSON.parse(row.dataset.originalData);
 
                 // 恢复各个单元格的内容
-                cells[0].textContent = originalData.name || '-';
-                cells[1].textContent = originalData.path;
-                cells[2].textContent = originalData.target;
-                cells[3].textContent = originalData.expiry || '永久有效';
+                cells[0].textContent = dataToRestore.name || '-';
+                cells[1].textContent = dataToRestore.path;
+                cells[2].textContent = dataToRestore.target;
+                // 正确显示日期和时间，或“永久有效”
+                cells[3].textContent = dataToRestore.expiry ? new Date(dataToRestore.expiry).toLocaleString() : '永久有效';
 
-                // 恢复状态列
+                // 恢复状态列，添加自定义QR指示
                 cells[4].innerHTML = `
                     <div class="flex items-center gap-2">
-                        <span class="badge ${originalData.enabled ? 'badge-success' : 'badge-error'}">
-                            ${originalData.enabled ? '启用' : '禁用'}
+                        <span class="badge ${dataToRestore.enabled ? 'badge-success' : 'badge-error'} text-white">
+                            ${dataToRestore.enabled ? '启用' : '禁用'}
                         </span>
-                        ${originalData.isWechat ? '<span class="badge badge-info">微信</span>' : ''}
+                        ${dataToRestore.isWechat ? '<span class="badge badge-info text-white">微信</span>' : ''}
+                        ${(dataToRestore.qrCodeData1 || dataToRestore.qrCodeData2) ? '<span class="badge badge-neutral text-white">自定义QR</span>' : ''}
                     </div>
                 `;
 
@@ -1681,14 +1666,16 @@
                 // 重新绑定事件监听器
                 const [editBtn, deleteBtn, qrBtn] = actionsCell.querySelectorAll('button');
                 editBtn.onclick = () => toggleEditMode(row);
-                deleteBtn.onclick = () => deleteMapping(originalData.path);
+                deleteBtn.onclick = () => deleteMapping(dataToRestore.path);
                 qrBtn.onclick = () => {
-                    const path = originalData.path;
-                    const target = originalData.target;
-                    const qrCodeData1 = originalData.qrCodeData1 || null;
-                    const qrCodeData2 = originalData.qrCodeData2 || null;
-                    const qrOrder = originalData.qrOrder || null;
-                    openQrManagementModal(path, target, qrCodeData1, qrCodeData2, qrOrder);
+                    // 使用 dataToRestore (即 row.dataset.originalData 的内容)
+                    openQrManagementModal(
+                        dataToRestore.path, 
+                        dataToRestore.target, 
+                        dataToRestore.qrCodeData1 || null, 
+                        dataToRestore.qrCodeData2 || null, 
+                        dataToRestore.qrOrder || null
+                    );
                 };
 
                 row.classList.remove('editing');
