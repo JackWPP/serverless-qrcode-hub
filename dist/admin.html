@@ -272,12 +272,27 @@
                 <button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button>
             </form>
             <h3 class="font-bold text-lg mb-4">二维码</h3>
-            <div id="qr-container" class="flex justify-center mb-4"></div>
+            <div class="flex justify-around mb-4">
+                <div id="qr-container-1" class="flex flex-col items-center">
+                    <p class="text-sm font-semibold mb-2">二维码 1</p>
+                    <div id="qr-canvas-1"></div>
+                </div>
+                <div id="qr-container-2" class="flex flex-col items-center">
+                    <p class="text-sm font-semibold mb-2">二维码 2</p>
+                    <div id="qr-canvas-2"></div>
+                </div>
+            </div>
             <div class="mb-4">
                 <label class="floating-label">
-                    <span class="label-text text-primary">链接地址</span>
+                    <span class="label-text text-primary">链接地址 1</span>
                 </label>
-                <input type="text" id="qr-url" class="input input-ghost w-full" readonly>
+                <input type="text" id="qr-url-1" class="input input-ghost w-full" readonly>
+            </div>
+            <div class="mb-4">
+                <label class="floating-label">
+                    <span class="label-text text-primary">链接地址 2 (可选)</span>
+                </label>
+                <input type="text" id="qr-url-2" class="input input-ghost w-full" readonly>
             </div>
             <div class="modal-action gap-4">
                 <label class="label cursor-pointer gap-2">
@@ -294,7 +309,8 @@
                     <option value="extra-rounded">超圆角</option>
                 </select>
 
-                <button id="qr-download" class="btn btn-info">下载二维码</button>
+                <button id="qr-download-1" class="btn btn-info">下载二维码 1</button>
+                <button id="qr-download-2" class="btn btn-info">下载二维码 2</button>
                 <button class="btn btn-primary" onclick="document.getElementById('qr-modal').close()">关闭</button>
             </div>
         </div>
@@ -1137,19 +1153,24 @@
             }
 
             // 修改生成二维码的函数
-            function generateQRForMapping(url, newPath) {
+            function generateQRForMapping(url1, path1, url2 = null, path2 = null) {
                 const modal = document.getElementById('qr-modal');
-                const container = document.getElementById('qr-container');
-                const downloadBtn = document.getElementById('qr-download');
-                const urlInput = document.getElementById('qr-url');
+                const container1 = document.getElementById('qr-canvas-1');
+                const container2 = document.getElementById('qr-canvas-2');
+                const downloadBtn1 = document.getElementById('qr-download-1');
+                const downloadBtn2 = document.getElementById('qr-download-2');
+                const urlInput1 = document.getElementById('qr-url-1');
+                const urlInput2 = document.getElementById('qr-url-2');
                 const showLogoCheckbox = document.getElementById('qr-show-logo');
                 const dotsStyleSelect = document.getElementById('qr-dots-style');
 
                 // 清空之前的内容
-                container.innerHTML = '';
+                container1.innerHTML = '';
+                container2.innerHTML = '';
 
                 // 设置 URL 文本
-                urlInput.value = url;
+                urlInput1.value = url1;
+                urlInput2.value = url2 || '';
 
                 // 从 localStorage 获取保存的设置
                 const savedShowLogo = localStorage.getItem('qr-show-logo');
@@ -1164,9 +1185,9 @@
                 }
 
                 // 基础 QR 配置
-                const getQRConfig = (showLogo, dotsType) => ({
-                    width: 300,
-                    height: 300,
+                const getQRConfig = (url, showLogo, dotsType) => ({
+                    width: 200, // 调整大小以适应两个二维码
+                    height: 200,
                     type: 'canvas',
                     data: url,
                     dotsOptions: {
@@ -1195,43 +1216,71 @@
                     } : {})
                 });
 
-                // 创建新的二维码
-                let currentQRCode = new QRCodeStyling(getQRConfig(showLogoCheckbox.checked, dotsStyleSelect.value));
-                currentQRCode.append(container);
+                let qrCodeInstance1 = null;
+                let qrCodeInstance2 = null;
+
+                // 创建第一个二维码
+                if (url1) {
+                    qrCodeInstance1 = new QRCodeStyling(getQRConfig(url1, showLogoCheckbox.checked, dotsStyleSelect.value));
+                    qrCodeInstance1.append(container1);
+                    downloadBtn1.disabled = false;
+                } else {
+                    downloadBtn1.disabled = true;
+                }
+
+                // 创建第二个二维码
+                if (url2) {
+                    qrCodeInstance2 = new QRCodeStyling(getQRConfig(url2, showLogoCheckbox.checked, dotsStyleSelect.value));
+                    qrCodeInstance2.append(container2);
+                    downloadBtn2.disabled = false;
+                } else {
+                    downloadBtn2.disabled = true;
+                }
 
                 // 监听复选框和选择器变化
-                const updateQRCode = () => {
-                    container.classList.add('switching');
+                const updateBothQRCodes = () => {
+                    const showLogo = showLogoCheckbox.checked;
+                    const dotsType = dotsStyleSelect.value;
 
-                    setTimeout(() => {
-                        container.innerHTML = '';
-                        currentQRCode = new QRCodeStyling(getQRConfig(showLogoCheckbox.checked, dotsStyleSelect.value));
-                        currentQRCode.append(container);
-
-                        // 保存设置到 localStorage
-                        localStorage.setItem('qr-show-logo', showLogoCheckbox.checked);
-                        localStorage.setItem('qr-dots-style', dotsStyleSelect.value);
-
-                        requestAnimationFrame(() => {
-                            container.classList.remove('switching');
-                        });
-                    }, 200);
+                    if (qrCodeInstance1) {
+                        container1.classList.add('switching');
+                        setTimeout(() => {
+                            container1.innerHTML = '';
+                            qrCodeInstance1 = new QRCodeStyling(getQRConfig(url1, showLogo, dotsType));
+                            qrCodeInstance1.append(container1);
+                            requestAnimationFrame(() => container1.classList.remove('switching'));
+                        }, 200);
+                    }
+                    if (qrCodeInstance2) {
+                        container2.classList.add('switching');
+                        setTimeout(() => {
+                            container2.innerHTML = '';
+                            qrCodeInstance2 = new QRCodeStyling(getQRConfig(url2, showLogo, dotsType));
+                            qrCodeInstance2.append(container2);
+                            requestAnimationFrame(() => container2.classList.remove('switching'));
+                        }, 200);
+                    }
+                    // 保存设置到 localStorage
+                    localStorage.setItem('qr-show-logo', showLogo);
+                    localStorage.setItem('qr-dots-style', dotsType);
                 };
 
-                showLogoCheckbox.onchange = updateQRCode;
-                dotsStyleSelect.onchange = updateQRCode;
+                showLogoCheckbox.onchange = updateBothQRCodes;
+                dotsStyleSelect.onchange = updateBothQRCodes;
 
                 // 更新下载按钮点击事件
-                downloadBtn.onclick = () => {
-                    const timestamp = new Date().toISOString()
-                        .replace(/[:.]/g, '-')
-                        .replace('T', '_')
-                        .replace('Z', '');
-                    const fileName = `qr-${newPath}-${timestamp}`;
-                    currentQRCode.download({
-                        name: fileName,
-                        extension: 'png'
-                    });
+                downloadBtn1.onclick = () => {
+                    if (!qrCodeInstance1) return;
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', '');
+                    const fileName = `qr1-${path1}-${timestamp}`;
+                    qrCodeInstance1.download({ name: fileName, extension: 'png' });
+                };
+
+                downloadBtn2.onclick = () => {
+                    if (!qrCodeInstance2) return;
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', '');
+                    const fileName = `qr2-${path2 || 'default'}-${timestamp}`;
+                    qrCodeInstance2.download({ name: fileName, extension: 'png' });
                 };
 
                 // 显示模态框
@@ -1301,7 +1350,10 @@
                     e.preventDefault();
                     deleteMapping(path);
                 };
-                qrBtn.onclick = () => generateQRForMapping(window.location.origin + '/' + path, path);
+                qrBtn.onclick = () => {
+                    // 目前只传递一个URL，第二个URL的逻辑待定
+                    generateQRForMapping(window.location.origin + '/' + path, path, null, null);
+                };
 
                 row.appendChild(actionsCell);
                 return row;
@@ -1397,7 +1449,10 @@
                         const [saveBtn, cancelBtn, qrBtn] = actionsCell.querySelectorAll('button');
                         saveBtn.onclick = () => saveEdit(row);
                         cancelBtn.onclick = () => restoreRow(row);
-                        qrBtn.onclick = () => generateQRForMapping(window.location.origin + '/' + originalData.path, originalData.path);
+                        qrBtn.onclick = () => {
+                            // 目前只传递一个URL，第二个URL的逻辑待定
+                            generateQRForMapping(window.location.origin + '/' + originalData.path, originalData.path, null, null);
+                        };
                     } catch (error) {
                         console.error('获取数据失败:', error);
                         showAlert('获取数据失败，请重试');
@@ -1517,7 +1572,10 @@
                 const [editBtn, deleteBtn, qrBtn] = actionsCell.querySelectorAll('button');
                 editBtn.onclick = () => toggleEditMode(row);
                 deleteBtn.onclick = () => deleteMapping(originalData.path);
-                qrBtn.onclick = () => generateQRForMapping(window.location.origin + '/' + originalData.path, originalData.path);
+                qrBtn.onclick = () => {
+                    // 目前只传递一个URL，第二个URL的逻辑待定
+                    generateQRForMapping(window.location.origin + '/' + originalData.path, originalData.path, null, null);
+                };
 
                 row.classList.remove('editing');
             }
@@ -1852,54 +1910,10 @@
                 });
             });
 
-            // 更新生成二维码的函数，使用保存的设置
-            function updateQRCode() {
-                const url = document.getElementById('qr-url').value;
-                const showLogo = document.getElementById('qr-show-logo').checked;
-                const dotsStyle = document.getElementById('qr-dots-style').value;
-                
-                const options = {
-                    width: 240,
-                    height: 240,
-                    data: url,
-                    margin: 10,
-                    qrOptions: {
-                        typeNumber: 0,
-                        mode: 'Byte',
-                        errorCorrectionLevel: 'H'
-                    },
-                    imageOptions: {
-                        hideBackgroundDots: true,
-                        imageSize: 0.4,
-                        margin: 4
-                    },
-                    dotsOptions: {
-                        type: dotsStyle,
-                        color: '#000000'
-                    },
-                    backgroundOptions: {
-                        color: '#ffffff'
-                    }
-                };
-
-                if (showLogo) {
-                    options.image = '/wechat.svg';
-                }
-
-                // 如果已经存在二维码实例，先移除旧的
-                if (qrCode) {
-                    const container = document.getElementById('qr-container');
-                    container.classList.add('switching');
-                    
-                    setTimeout(() => {
-                        qrCode.update(options);
-                        container.classList.remove('switching');
-                    }, 200);
-                } else {
-                    qrCode = new QRCodeStyling(options);
-                    qrCode.append(document.getElementById('qr-container'));
-                }
-            }
+            // 更新生成二维码的函数，使用保存的设置 (此函数现在由 generateQRForMapping 内部的 updateBothQRCodes 处理)
+            // function updateQRCode() { ... } // Kept for reference, but functionality moved
+            // The global qrCode variable is also no longer needed as instances are managed within generateQRForMapping
+            // let qrCode; // Remove this global variable
 
         });
     </script>
